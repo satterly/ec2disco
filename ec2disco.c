@@ -165,7 +165,7 @@ int main(int argc, char *argv[])
                     const apr_xml_elem *elem5;
                     for (elem5 = elem4->first_child; elem5; elem5 = elem5->next) {
                         printf("      name = %s\n", elem5->name);
-                        if (apr_strnatcmp(elem5->name, "dnsName") == 0)
+                        if (apr_strnatcmp(elem5->name, "dnsName") == 0 && elem5->first_cdata.first != NULL)
                             printf("      dnsName = %s\n", elem5->first_cdata.first->text);
                         if (apr_strnatcmp(elem5->name, "groupSet") == 0) {
                             const apr_xml_elem *elem6;
@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
                                 printf("        name = %s\n", elem6->name);
                                 const apr_xml_elem *elem7;
                                 for (elem7 = elem6->first_child; elem7; elem7 = elem7->next) {
-                                    if (apr_strnatcmp(elem7->name, "groupId") == 0)
+                                    if (apr_strnatcmp(elem7->name, "groupId") == 0 && elem7->first_cdata.first != NULL)
                                         printf("          groupId = %s\n", elem7->first_cdata.first->text);
                                 }
                             }
