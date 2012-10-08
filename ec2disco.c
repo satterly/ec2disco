@@ -48,6 +48,16 @@ int main(int argc, char *argv[])
     unsigned char *aws_access_key_id = "AKIAIM3EQ4SCWGT6UZBA";
     unsigned char *aws_secret_access_key = "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";
 
+    char *host_type = "privateIpAddress";
+    const char *security_groups[2];
+    security_groups[0] = "quicklaunch-1";
+    security_groups[1] = NULL;
+    int  ec2_any_group = 1;
+    const char *ec2_tags[3];
+    ec2_tags[0] = "stage:dev";
+    ec2_tags[1] = "role:frontend";
+    ec2_tags[2] = NULL;
+
     apr_status_t rv;
     apr_pool_t *mp;		/* main pool */
 
@@ -57,26 +67,61 @@ int main(int argc, char *argv[])
     char timestamp[30];
     apr_size_t len;
 
+    printf("[discovery.ec2] using host_type [%s], tags [], groups [] with any_group [yes], availability_zones []\n", host_type);
+
     {
 	apr_time_exp_t t;
 	apr_time_exp_lt(&t, apr_time_now());
 	apr_strftime(timestamp, &len, sizeof(timestamp), "%Y-%m-%dT%H%%3A%M%%3A%SZ", &t);
     }
 
+    char *filters = "";
+    char num_str[3];
+    int filter_num = 1;
+    int i;
+    for (i = 0; security_groups[i] != NULL; i++) {
+        apr_snprintf(num_str, 3, "%d", filter_num);
+        filters = apr_pstrcat(mp, filters, "&Filter.", num_str, ".Name=group-name", "&Filter.", num_str, ".Value=", security_groups[i], NULL);
+        filter_num++;
+    }
+    printf("filter num %d\n", filter_num);
+    char *key;
+    char *value;
+    char *last;
+    char *tag;
+    for (i = 0; ec2_tags[i] != NULL; i++) {
+        printf("filter num %d\n", filter_num);
+        tag = apr_pstrdup(mp, ec2_tags[i]);
+        printf("tag = %s\n", tag);
+        key = apr_strtok(tag, ":", &last);
+        value = apr_strtok(NULL, ":", &last);
+        apr_snprintf(num_str, 3, "%d", filter_num);
+        filters = apr_pstrcat(mp, filters, "&Filter.", num_str, ".Name=tag%3A", key, "&Filter.", num_str, ".Value=", value, NULL);
+        filter_num++;
+    }
+    printf("Filters = %s\n", filters);
+
     /* FIXME Need to allow query for tags and group as well */
+    char *query_string;
+    query_string =
+	apr_pstrcat(mp, "AWSAccessKeyId=", aws_access_key_id,
+		    "&Action=DescribeInstances",
+                    (filters ? filters : ""),
+		    "&SignatureMethod=HmacSHA256",
+                    "&SignatureVersion=2",
+		    "&Timestamp=", timestamp,
+                    "&Version=2012-08-15", NULL);
+
     char *signature_string;
     signature_string =
-	apr_pstrcat(mp, "GET\n", "ec2.amazonaws.com\n", "/\n",
-		    "AWSAccessKeyId=", aws_access_key_id,
-		    "&Action=DescribeInstances",
-		    "&SignatureMethod=HmacSHA256", "&SignatureVersion=2",
-		    "&Timestamp=", timestamp, "&Version=2012-08-15", NULL);
-    // printf("signature string = %s\n", signature_string);
+	apr_pstrcat(mp, "GET\n", "ec2.amazonaws.com\n", "/\n", query_string, NULL);
+    printf("signature string = %s\n", signature_string);
 
     char hash[EVP_MAX_MD_SIZE];
     int hlen;
     HMAC(EVP_sha256(), aws_secret_access_key,
 	 strlen(aws_secret_access_key), (unsigned char *) signature_string, strlen(signature_string), hash, &hlen);
+    printf("signature string = %s\n", signature_string);
 
     /* base64 encode the signature string */
     int elen;
@@ -84,6 +129,7 @@ int main(int argc, char *argv[])
     elen = apr_base64_encode_len(hlen);
     encbuf = apr_palloc(mp, elen);
     apr_base64_encode(encbuf, hash, hlen);
+    printf("base64 encoded hash %s", encbuf);
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
@@ -93,12 +139,9 @@ int main(int argc, char *argv[])
 
 	char *request;
 	request =
-	    apr_pstrcat(mp, ec2_api_endpoint, "?AWSAccessKeyId=",
-			aws_access_key_id,
-			"&Action=DescribeInstances&Signature=",
-			urlencoded_hash,
-			"&SignatureMethod=HmacSHA256&SignatureVersion=2&Timestamp=",
-			timestamp, "&Version=2012-08-15", NULL);
+	    apr_pstrcat(mp, ec2_api_endpoint, "?",
+                        query_string,
+			"&Signature=", urlencoded_hash, NULL);
 	printf("HTTP request: %s\n", request);
 
 	curl_easy_setopt(curl_handle, CURLOPT_URL, request);
@@ -146,6 +189,8 @@ int main(int argc, char *argv[])
     apr_xml_elem *root;
     root = doc->root;
     const apr_xml_elem *elem;
+
+    char instance_id[20];
     
     for (elem = root->first_child; elem; elem = elem->next) {
         printf("name = %s\n", elem->name);
@@ -165,8 +210,10 @@ int main(int argc, char *argv[])
                     const apr_xml_elem *elem5;
                     for (elem5 = elem4->first_child; elem5; elem5 = elem5->next) {
                         printf("      name = %s\n", elem5->name);
-                        if (apr_strnatcmp(elem5->name, "dnsName") == 0 && elem5->first_cdata.first != NULL)
-                            printf("      dnsName = %s\n", elem5->first_cdata.first->text);
+                        if (apr_strnatcmp(elem5->name, "instanceId") == 0 && elem5->first_cdata.first != NULL)
+                            strcpy(instance_id, elem5->first_cdata.first->text);
+                        if (apr_strnatcmp(elem5->name, host_type) == 0 && elem5->first_cdata.first != NULL)
+                            printf("[discovery.ec2] adding %s, udp send channel %s:8649\n", instance_id, elem5->first_cdata.first->text);
                         if (apr_strnatcmp(elem5->name, "groupSet") == 0) {
                             const apr_xml_elem *elem6;
                             for (elem6 = elem5->first_child; elem6; elem6 = elem6->next) {
@@ -183,6 +230,8 @@ int main(int argc, char *argv[])
             }
         }
     }
+
+    
 
     apr_terminate();
     return 0;
