@@ -45,8 +45,8 @@ int main(int argc, char *argv[])
 
     const char *ec2_api_endpoint = "https://ec2.amazonaws.com/";
 
-    unsigned char *aws_access_key_id = "AKIAIM3EQ4SCWGT6UZBA";
-    unsigned char *aws_secret_access_key = "m1ZsluSMeAdvm8XGw01sDRKvmQPKkeWoD4hoeDJ6";
+    unsigned char *aws_access_key_id = "022QF06E7MXBSAMPLE";
+    unsigned char *aws_secret_access_key = "kWcrlUX5JEDGM/SAMPLE/aVmYvHNif5zB+d9+ct";
 
     char *host_type = "privateIpAddress";
     const char *security_groups[2];
